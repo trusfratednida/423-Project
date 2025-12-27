@@ -10,8 +10,7 @@ fovY = 90
 window_width, window_height = 1000, 800
 
 # camera variables
-
-camera_position = (0, 4000, 150)
+camera_position = (0, 4100, 250)
 
 fpp_mode = False
 
@@ -22,7 +21,7 @@ bullet_count = 0
 nitro_count = 0
 game_speed = 10
 last_time = time.time()
-
+isPaused = False
 
 # graphics related variables
 isDay = True
@@ -46,8 +45,12 @@ ramp_positions = {}
 #     id2 :(x, y, z),
 # }
 
-ramp_spawn_delay = 15
+ramp_spawn_delay = 2
 last_ramp_time = time.time()
+
+is_jumping = False
+max_height = 400
+jump_phase = None
 
 
 ramp_length = 200
@@ -69,8 +72,8 @@ def specialKeyboardListener(key, x, y):
         camera_position = (cam_x, cam_y, cam_z)
     
     if key == GLUT_KEY_UP:
-        cam_z = min(cam_z + step, 300)
-        cam_y = min(cam_y + 5, 4075)
+        cam_z = min(cam_z + step, 420)
+        cam_y = min(cam_y + 5, 4100)
         camera_position = (cam_x, cam_y, cam_z)
 
     if key == GLUT_KEY_DOWN:
@@ -82,7 +85,7 @@ def mouseListener():
     pass
 
 def keyboardListener(key, x, y):
-    global sky_color, road_width, isDay, car_x, car_y, car_z, ramp_positions
+    global road_width, isDay, car_x, car_y, car_z, ramp_positions, isPaused, fpp_mode
     
     if key == b'n' or key == b'N': #day and night shifter
         isDay = not isDay
@@ -93,11 +96,17 @@ def keyboardListener(key, x, y):
     if key == b'd' or key == b'D':
         car_x = max(car_x-10, -road_width+50)
 
+    if key == b'p' or key == b'P':
+        isPaused = not isPaused
+    
+    if key == b'v' or key == b'V':
+        fpp_mode = not fpp_mode
+
     if key == b'x' or key == b'X':
-        print(ramp_positions)
+        print(camera_position)
     
 def setupCamera():
-    global camera_position, window_width, window_height, fpp_mode
+    global camera_position, window_width, window_height, fpp_mode, car_x, car_y, car_z
 
     glMatrixMode(GL_PROJECTION)
     glLoadIdentity()
@@ -107,7 +116,9 @@ def setupCamera():
     glLoadIdentity()
 
     if fpp_mode:
-        pass
+        gluLookAt(car_x, car_y+100, car_z + 80,
+                  0, 0, 0,
+                  0, 0, 1)
     else:
         cam_x, cam_y, cam_z = camera_position
 
@@ -236,8 +247,7 @@ def draw_ramp():
 
             glPopMatrix()
         else:
-            ramp_positions.pop(ramp_id)
-            
+            ramp_positions.pop(ramp_id)           
 
 def draw_car():
     global car_x, car_y, car_z, car_rotation
@@ -245,6 +255,8 @@ def draw_car():
     glPushMatrix()
 
     glTranslatef(car_x, car_y + 50, car_z)
+    # glTranslatef(0, 0, car_z+30)
+    # glRotatef(-45, 1, 0, 0)
     glRotatef(car_rotation, 1, 0, 0)
     glTranslatef(-car_x, -(car_y + 50), -car_z)
 
@@ -341,30 +353,81 @@ def showScreen():
     glutSwapBuffers()
 
 def animate():
-    # all scenario animations
-    global element_offset, game_speed, last_time, ramp_positions, last_ramp_time, ramp_spawn_delay
+    # all scenario animations (illutions of particles moving backwards)
+    global element_offset, game_speed, last_time, ramp_positions, ramp_width, last_ramp_time, ramp_spawn_delay, car_x, car_y, car_z, car_rotation
+    global is_jumping, ramp_angle, isPaused, max_height, jump_phase
 
     current_time = time.time()
-    dt = current_time - last_time   # seconds elapsed since last frame
-    last_time = current_time
-    element_offset -= game_speed * dt * 100
+
+    if not isPaused:
+        dt = current_time - last_time   # seconds elapsed since last frame
+        last_time = current_time
+        element_offset -= game_speed * dt * 100
 
 
-    # ramp position animations
-    for id, positions in ramp_positions.items():
-        ramp_x, ramp_y, ramp_z = positions
-        ramp_y += game_speed * dt * 100
-        ramp_positions[id] = (ramp_x, ramp_y, ramp_z)
+        # ramp position animations
+        for id, positions in ramp_positions.items():
+            ramp_x, ramp_y, ramp_z = positions
+            ramp_y += game_speed * dt * 100
+            ramp_positions[id] = (ramp_x, ramp_y, ramp_z)
 
-    if current_time - last_ramp_time >= ramp_spawn_delay:
-        new_x = random.randint(-200, 200)  # random x position
-        new_y = 0                       
-        new_z = 2
+        if current_time - last_ramp_time >= ramp_spawn_delay:
+            new_x = random.randint(-200, 200)  # random x position
+            new_y = 0                       
+            new_z = 2
 
-        ramp_id = max(ramp_positions.keys(), default=0) + 1
-        ramp_positions[ramp_id] = (new_x, new_y, new_z)
-        last_ramp_time = current_time
+            ramp_id = max(ramp_positions.keys(), default=0) + 1
+            ramp_positions[ramp_id] = (new_x, new_y, new_z)
+            last_ramp_time = current_time
 
+        # car jumping animation
+        if not is_jumping:
+            for ramp_x, ramp_y, ramp_z in ramp_positions.values():
+                if abs(car_x - ramp_x) < (ramp_width/2 + 50) and abs(car_y - ramp_y) < ramp_length/2:
+                    is_jumping = True
+                    jump_phase = "ramp"
+                    break
+
+
+        if is_jumping:
+            # dt = current_time - last_time
+            rotation_step = 20 * dt * game_speed
+            jumping_step = 60 * dt * game_speed
+
+            if jump_phase == "ramp":
+                car_rotation -= rotation_step
+                car_z += jumping_step
+                if car_rotation <= -45:
+                    car_rotation = -45 
+                    jump_phase = "going_up"
+            
+            elif jump_phase == "going_up":
+                car_z += jumping_step
+                if car_z >= max_height/2:
+                    car_rotation = min(car_rotation+rotation_step, 0)
+
+                if car_z >= max_height:
+                    car_z = max_height
+                    jump_phase = "going_down"
+            
+            elif jump_phase == "going_down":
+                car_rotation += rotation_step
+                car_z -= jumping_step
+                if car_rotation > 45:
+                    car_rotation = 45
+                    jump_phase = "land"
+            
+            elif jump_phase == "land":
+                car_z -= jumping_step
+                if car_z <= max_height/2:
+                    car_rotation = max(car_rotation-rotation_step, 0)
+                
+                if car_z <= 16:
+                    car_z = 16
+
+                    is_jumping = False
+
+    
     glutPostRedisplay()
 
 def main():
